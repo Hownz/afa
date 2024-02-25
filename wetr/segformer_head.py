@@ -50,7 +50,7 @@ class SegFormerHead(nn.Module):
             in_channels=embedding_dim*4,
             out_channels=embedding_dim,
             kernel_size=1,
-            norm_cfg=dict(type='SyncBN', requires_grad=True)
+            norm_cfg=dict(type='SyncBN', requires_grad=True) # 同步批量归一化（SyncBN）：分布式训练时使用
         )
 
         self.linear_pred = nn.Conv2d(embedding_dim, self.num_classes, kernel_size=1)
@@ -63,7 +63,7 @@ class SegFormerHead(nn.Module):
         n, _, h, w = c4.shape
 
         _c4 = self.linear_c4(c4).permute(0,2,1).reshape(n, -1, c4.shape[2], c4.shape[3])
-        _c4 = F.interpolate(_c4, size=c1.size()[2:],mode='bilinear',align_corners=False)
+        _c4 = F.interpolate(_c4, size=c1.size()[2:],mode='bilinear',align_corners=False) # 双线性插值
 
         _c3 = self.linear_c3(c3).permute(0,2,1).reshape(n, -1, c3.shape[2], c3.shape[3])
         _c3 = F.interpolate(_c3, size=c1.size()[2:],mode='bilinear',align_corners=False)

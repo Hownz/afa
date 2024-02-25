@@ -170,9 +170,14 @@ def train(cfg):
 
     num_workers = 10
 
-    torch.cuda.set_device(args.local_rank)
-    dist.init_process_group(backend=args.backend,)
-    
+    # 分布式
+    # torch.cuda.set_device(args.local_rank) # 设置的GPU设备为当前设备
+    # dist.init_process_group(backend=args.backend,)
+    # 检查GPU是否可用
+    if torch.cuda.is_available():
+        # 设置使用的GPU设备索引为0
+        torch.cuda.set_device(0)
+        
     time0 = datetime.datetime.now()
     time0 = time0.replace(microsecond=0)
     
@@ -200,15 +205,13 @@ def train(cfg):
         num_classes=cfg.dataset.num_classes,
     )
     
-    train_sampler = DistributedSampler(train_dataset,shuffle=True)
+    # train_sampler = DistributedSampler(train_dataset,shuffle=True)
     train_loader = DataLoader(train_dataset,
                               batch_size=cfg.train.samples_per_gpu,
-                              #shuffle=True,
+                              shuffle=True,
                               num_workers=num_workers,
                               pin_memory=False,
-                              drop_last=True,
-                              sampler=train_sampler,
-                              prefetch_factor=4)
+                              drop_last=True)
 
     val_loader = DataLoader(val_dataset,
                             batch_size=1,
@@ -217,14 +220,16 @@ def train(cfg):
                             pin_memory=False,
                             drop_last=False)
 
-    device = torch.device(args.local_rank)
-
+    # device = torch.device(args.local_rank)
+    device = torch.device("cuda:0")
+    
     wetr = WeTr(backbone=cfg.backbone.config,
                 stride=cfg.backbone.stride,
                 num_classes=cfg.dataset.num_classes,
                 embedding_dim=256,
                 pretrained=True,
                 pooling=args.pooling,)
+    
     logging.info('\nNetwork config: \n%s'%(wetr))
     param_groups = wetr.get_param_groups()
     par = PAR(num_iter=15, dilations=[1,2,4,8,12,24])

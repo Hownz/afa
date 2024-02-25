@@ -24,7 +24,7 @@ class Mlp(nn.Module):
         self.dwconv = DWConv(hidden_features)
         self.act = act_layer()
         self.fc2 = nn.Linear(hidden_features, out_features)
-        self.drop = nn.Dropout(drop)
+        self.drop = nn.Dropout(drop) # 丢弃的概率
 
         self.apply(self._init_weights)
 
@@ -60,25 +60,29 @@ class Attention(nn.Module):
 
         self.dim = dim
         self.num_heads = num_heads
-        head_dim = dim // num_heads
-        self.scale = qk_scale or head_dim ** -0.5
+        head_dim = dim // num_heads # 确保特征维度 dim 可以被注意力头数 num_heads 整除，
+                                    # 以确保分割的注意力头能够正确拼接回原始维度。
+        self.scale = qk_scale or head_dim ** -0.5 # 缩放因子，用于缩放注意力分数。
+                                                  # 如果 qk_scale 存在且不为 None，则返回 qk_scale，
+                                                  # 否则返回 head_dim ** -0.5。
 
         self.q = nn.Linear(dim, dim, bias=qkv_bias)
         self.kv = nn.Linear(dim, dim * 2, bias=qkv_bias)
-        self.attn_drop = nn.Dropout(attn_drop)
+        self.attn_drop = nn.Dropout(attn_drop) # Dropout 操作，用于在注意力计算阶段引入随机性，有助于防止过拟合。
         self.proj = nn.Linear(dim, dim)
-        self.proj_drop = nn.Dropout(proj_drop)
+        self.proj_drop = nn.Dropout(proj_drop) # 另一个 Dropout 操作，用于最终的投影输出。
 
+        # 空间下采样（Spatial Reduction）操作，用于减少计算量。
         self.sr_ratio = sr_ratio
         if sr_ratio > 1:
-            self.sr = nn.Conv2d(dim, dim, kernel_size=sr_ratio, stride=sr_ratio)
+            self.sr = nn.Conv2d(dim, dim, kernel_size=sr_ratio, stride=sr_ratio) # 下采样操作
             self.norm = nn.LayerNorm(dim)
 
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=.02)
+            trunc_normal_(m.weight, std=.02) # 对 Linear 层的权重进行截断正态分布初始化。
             if isinstance(m, nn.Linear) and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
         elif isinstance(m, nn.LayerNorm):
@@ -86,28 +90,33 @@ class Attention(nn.Module):
             nn.init.constant_(m.weight, 1.0)
         elif isinstance(m, nn.Conv2d):
             fan_out = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-            fan_out //= m.groups
+            fan_out //= m.groups 
             m.weight.data.normal_(0, math.sqrt(2.0 / fan_out))
             if m.bias is not None:
                 m.bias.data.zero_()
 
     def forward(self, x, H, W):
-        B, N, C = x.shape
-        q = self.q(x).reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
-
+        B, N, C = x.shape # B means batch size, 
+                          # N means number of patches, 
+                          # C means channels.
+        q = self.q(x).reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3) # q.shape = (B, num_heads, N, C // num_heads)  
+        
+        # 是否进行下采样操作
         if self.sr_ratio > 1:
             x_ = x.permute(0, 2, 1).reshape(B, C, H, W)
             x_ = self.sr(x_).reshape(B, C, -1).permute(0, 2, 1)
             x_ = self.norm(x_)
-            kv = self.kv(x_).reshape(B, -1, 2, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+            kv = self.kv(x_).reshape(B, -1, 2, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4) # kv.shape = (2, B, num_heads, N, C // num_heads)
         else:
-            kv = self.kv(x).reshape(B, -1, 2, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        k, v = kv[0], kv[1]
+            kv = self.kv(x).reshape(B, -1, 2, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4) # kv.shape = (2, B, num_heads, N, C // num_heads)
+        k, v = kv[0], kv[1] # 确定k和v
 
-        attn_ = (q @ k.transpose(-2, -1))
+        attn_ = (q @ k.transpose(-2, -1)) # @ means matrix multiplication，其中 @ 表示矩阵乘法
 
-        '''if self.sr_ratio == 1:
-            attn_ = attn_ + attn_.permute(0, 1, 3, 2)'''
+        '''
+        if self.sr_ratio == 1:
+        attn_ = attn_ + attn_.permute(0, 1, 3, 2)
+        '''
 
         attn = (attn_ * self.scale).softmax(dim=-1)
         attn = self.attn_drop(attn)
@@ -143,7 +152,7 @@ class Block(nn.Module):
             num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
             attn_drop=attn_drop, proj_drop=drop, sr_ratio=sr_ratio)
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity() # dropout layer
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
@@ -379,15 +388,20 @@ class MixVisionTransformer(nn.Module):
 
 
 class DWConv(nn.Module):
+    '''
+    深度可分离卷积 Depthwise Separable Convolution
+    '''
     def __init__(self, dim=768):
         super(DWConv, self).__init__()
-        self.dwconv = nn.Conv2d(dim, dim, 3, 1, 1, bias=True, groups=dim)
+        self.dwconv = nn.Conv2d(dim, dim, 3, 1, 1, bias=True, groups=dim) # 3x3 深度可分离卷积
+                                                                          # 表示输入和输出通道数都是 dim，卷积核大小为 3x3，步幅为 1，填充为 1。
+                                                                          # 其中 groups=dim 表示每个通道有单独的卷积核。
 
     def forward(self, x, H, W):
         B, N, C = x.shape
         x = x.transpose(1, 2).view(B, C, H, W)
         x = self.dwconv(x)
-        x = x.flatten(2).transpose(1, 2)
+        x = x.flatten(2).transpose(1, 2) # 2 维度 后的全推平，shape = (B, C, N) => 转置 => (B, N, C)
 
         return x
 
